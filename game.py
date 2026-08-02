@@ -2,9 +2,10 @@ import pygame, math, random, sys, array, json, os
 
 try:
     pygame.mixer.pre_init(22050, -16, 1, 512)
+    pygame.init()
+    pygame.mixer.init()
 except Exception:
-    pass
-pygame.init()
+    pygame.init()
 
 W, H = 1280, 720
 screen = pygame.display.set_mode((W, H))
@@ -107,7 +108,17 @@ def play(name, vol=1.0):
     if MUTED: return
     s = SND.get(name)
     if s:
-        s.set_volume(vol); s.play()
+        try:
+            s.set_volume(vol); s.play()
+        except Exception:
+            pass
+
+def start_music():
+    if MUSIC and not MUTED:
+        try:
+            MUSIC.set_volume(0.10); MUSIC.play(loops=-1)
+        except Exception:
+            pass
 
 def start_music():
     if MUSIC and not MUTED:

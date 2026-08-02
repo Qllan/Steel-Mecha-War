@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARMORED CORE 2D // VERTICAL SHIFT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0e14; --panel:#10151f; --panel2:#0c1119;
+  --cyan:#3ce6ff; --orange:#ff8c1a; --gold:#ffc850; --red:#ff3b3b; --green:#2eff8b;
+  --text:#c8d2e0; --dim:#5a6b82; --line:rgba(60,230,255,.22);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Rajdhani','Segoe UI',sans-serif;overflow-x:hidden}
+
+/* фоновые слои */
+.bg-grid{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(60,230,255,.05) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(60,230,255,.05) 1px,transparent 1px);
+  background-size:48px 48px;
+  -webkit-mask-image:radial-gradient(ellipse at 50% 35%,#000 30%,transparent 90%);
+  mask-image:radial-gradient(ellipse at 50% 35%,#000 30%,transparent 90%);}
+.bg-glow{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(700px 500px at 12% 8%,rgba(60,230,255,.10),transparent 60%),
+    radial-gradient(800px 600px at 88% 92%,rgba(255,140,26,.09),transparent 60%),
+    radial-gradient(500px 400px at 70% 20%,rgba(255,59,59,.05),transparent 60%);}
+.scanlines{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.3;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.2) 0 1px,transparent 1px 3px);}
+.particles{position:fixed;inset:0;z-index:1;pointer-events:none;overflow:hidden}
+.p{position:absolute;bottom:-10px;width:3px;height:3px;border-radius:50%;animation:rise linear infinite}
+@keyframes rise{to{transform:translateY(-110vh)}}
+
+/* верхняя панель */
+.topbar{position:relative;z-index:2;display:flex;justify-content:space-between;align-items:center;
+  padding:14px 28px;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(16,21,31,.92),rgba(16,21,31,.55));}
+.logo{font-family:'Chakra Petch';font-weight:700;font-size:20px;letter-spacing:2px;color:var(--cyan);display:flex;align-items:center;gap:11px}
+.logo .tri{width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:16px solid var(--red)}
+.status{display:flex;align-items:center;gap:18px;font-family:monospace;font-size:12px;color:var(--dim);letter-spacing:1px}
+.light{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.ver{color:var(--gold)}
+
+/* заголовок */
+.title-row{position:relative;z-index:2;max-width:1180px;margin:32px auto 0;padding:0 24px;
+  display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap}
+h1{font-family:'Chakra Petch';font-weight:700;font-size:clamp(34px,5vw,58px);letter-spacing:3px;line-height:1;animation:reveal .8s ease both}
+h1 span{color:var(--cyan)}
+@keyframes reveal{from{opacity:0;transform:translateY(14px);letter-spacing:9px}to{opacity:1;transform:none;letter-spacing:3px}}
+.subtitle{font-family:monospace;color:var(--dim);font-size:13px;letter-spacing:2px;padding-bottom:8px}
+
+/* игровая рамка */
+.game-section{position:relative;z-index:2;max-width:1180px;margin:26px auto 0;padding:0 24px}
+.frame-controls{display:flex;justify-content:flex-end;margin-bottom:10px}
+.ghost-btn{font-family:monospace;font-size:12px;letter-spacing:1px;color:var(--cyan);background:transparent;
+  border:1px solid var(--line);padding:8px 16px;cursor:pointer;transition:.15s}
+.ghost-btn:hover{background:rgba(60,230,255,.1);border-color:var(--cyan)}
+.game-frame{position:relative;aspect-ratio:16/9;background:#000;border:1px solid var(--line);
+  box-shadow:0 0 0 1px rgba(0,0,0,.6),0 0 44px rgba(60,230,255,.08),0 22px 60px rgba(0,0,0,.55)}
+.corner{position:absolute;width:26px;height:26px;border:2px solid var(--cyan);z-index:5}
+.corner.tl{top:-2px;left:-2px;border-right:0;border-bottom:0}
+.corner.tr{top:-2px;right:-2px;border-left:0;border-bottom:0}
+.corner.bl{bottom:-2px;left:-2px;border-right:0;border-top:0}
+.corner.br{bottom:-2px;right:-2px;border-left:0;border-top:0}
+iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+.sweep{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
+.sweep::after{content:'';position:absolute;left:0;right:0;height:140px;top:-140px;
+  background:linear-gradient(180deg,transparent,rgba(60,230,255,.07),transparent);animation:sweep 7s linear infinite}
+@keyframes sweep{to{top:110%}}
+.power-overlay{position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at center,rgba(10,14,20,.82),rgba(10,14,20,.97));transition:opacity .6s ease;cursor:pointer}
+.power-overlay.off{opacity:0;pointer-events:none}
+.power-content{text-align:center}
+.power-icon{font-size:52px;color:var(--cyan);text-shadow:0 0 24px rgba(60,230,255,.7);margin-bottom:14px;animation:blink 2.4s infinite}
+.power-label{font-family:monospace;color:var(--dim);letter-spacing:3px;font-size:13px;margin-bottom:24px}
+.power-btn{font-family:'Chakra Petch';font-weight:700;font-size:18px;letter-spacing:3px;color:#0a0e14;background:var(--cyan);
+  border:0;padding:15px 46px;cursor:pointer;
+  clip-path:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px);
+  transition:transform .15s,box-shadow .15s,background .15s}
+.power-btn:hover{background:#7df0ff;transform:translateY(-2px);box-shadow:0 0 32px rgba(60,230,255,.5)}
+.power-btn:active{transform:translateY(0)}
+.readouts{display:flex;justify-content:space-between;font-family:monospace;font-size:11px;color:var(--dim);
+  letter-spacing:2px;margin-top:10px}
+.readouts b{color:var(--cyan);font-weight:normal}
+
+/* инфо-панели */
+.info{position:relative;z-index:2;max-width:1180px;margin:42px auto 0;padding:0 24px;
+  display:grid;grid-template-columns:1.2fr .8fr;gap:28px}
+.panel{background:var(--panel);border:1px solid var(--line);padding:26px 28px;
+  clip-path:polygon(0 0,calc(100% - 18px) 0,100% 18px,100% 100%,18px 100%,0 calc(100% - 18px))}
+.panel h2{font-family:'Chakra Petch';font-size:15px;letter-spacing:3px;color:var(--orange);
+  border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+.panel h2::before{content:'';width:8px;height:8px;background:var(--orange)}
+.brief p{font-size:16px;line-height:1.55;color:var(--text);margin-bottom:14px}
+.brief-list{list-style:none}
+.brief-list li{padding:8px 0 8px 22px;position:relative;font-size:16px;border-bottom:1px dashed rgba(90,107,130,.25)}
+.brief-list li::before{content:'▸';position:absolute;left:0;color:var(--cyan)}
+.brief-list b{color:var(--gold);font-weight:600}
+.key-row{display:flex;align-items:center;gap:14px;padding:7px 8px;border-bottom:1px dashed rgba(90,107,130,.25);transition:background .15s}
+.key-row:hover{background:rgba(60,230,255,.06)}
+kbd{font-family:monospace;font-size:12px;color:var(--cyan);background:var(--panel2);border:1px solid var(--line);
+  padding:4px 10px;min-width:70px;text-align:center;
+  clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+.key-row span{font-size:15px;letter-spacing:1px}
+footer{position:relative;z-index:2;text-align:center;padding:32px 24px;color:var(--dim);font-family:monospace;
+  font-size:12px;letter-spacing:1px;border-top:1px solid var(--line);margin-top:34px}
+footer b{color:var(--cyan);font-weight:normal}
+@media(max-width:860px){.info{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="bg-grid"></div><div class="bg-glow"></div><div class="particles" id="particles"></div><div class="scanlines"></div>
+
+<header class="topbar">
+  <div class="logo"><span class="tri"></span>AC-2D // VERTICAL SHIFT</div>
+  <div class="status"><span class="light"></span>SYSTEMS ONLINE<span class="ver">v0.3.1 // WEB BUILD</span></div>
+</header>
+
+<section class="title-row">
+  <h1>ARMORED CORE <span>2D</span></h1>
+  <div class="subtitle">ТАКТИЧЕСКИЙ МЕХ-ЭКШЕН // ЗАПУСКАЕТСЯ ПРЯМО В БРАУЗЕРЕ</div>
+</section>
+
+<section class="game-section">
+  <div class="frame-controls"><button id="fsBtn" class="ghost-btn">⛶ FULLSCREEN</button></div>
+  <div class="game-frame" id="gameFrame">
+    <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+    <iframe id="game" data-src="game/index.html" title="ARMORED CORE 2D" allow="fullscreen" allowfullscreen></iframe>
+    <div class="sweep"></div>
+    <div class="power-overlay" id="powerOverlay">
+      <div class="power-content">
+        <div class="power-icon">⏻</div>
+        <div class="power-label">БОЕВАЯ СИСТЕМА ОБЕСТОЧЕНА</div>
+        <button class="power-btn" id="powerBtn">POWER ON</button>
+      </div>
+    </div>
+  </div>
+  <div class="readouts"><span>SECTOR 7 // <b>LINK STABLE</b></span><span>RENDER <b>60 FPS</b> // WASM CORE</span></div>
+</section>
+
+<section class="info">
+  <div class="panel brief">
+    <h2>MISSION BRIEF</h2>
+    <p>Ты — пилот AC в секторе 7. Зачисти периметр, сними приоритетные цели и переживи дуэль с двумя боссами-антиподами.</p>
+    <ul class="brief-list">
+      <li><b>3 миссии</b> — волны, приоритетные цели под «живым щитом», осада крепости.</li>
+      <li><b>2 босса</b> — дуэлянт VINDICTA (клинок, рывки, клэши) и стена BASTION (фронтальный щит).</li>
+      <li><b>Гараж и экономика</b> — кредиты за ранг, 4 слота, вес сборки, легендарная деталь.</li>
+      <li><b>Система стаггера</b> — набивай ACS, ломай защиту, наказывай в окно x3 урона.</li>
+      <li><b>Прогресс сохраняется</b> — сейвы, лучшие ранги, анлоки.</li>
+    </ul>
+  </div>
+  <div class="panel">
+    <h2>CONTROLS</h2>
+    <div class="key-row"><kbd>WASD</kbd><span>Движение</span></div>
+    <div class="key-row"><kbd>MOUSE</kbd><span>Прицеливание</span></div>
+    <div class="key-row"><kbd>LMB</kbd><span>Огонь / заряд рельсотрона</span></div>
+    <div class="key-row"><kbd>RMB</kbd><span>Дробовик / гранаты / щит</span></div>
+    <div class="key-row"><kbd>Q</kbd><span>Ракеты</span></div>
+    <div class="key-row"><kbd>E</kbd><span>Энергоклинок (клэш!)</span></div>
+    <div class="key-row"><kbd>SHIFT</kbd><span>Quick Boost (i-frames)</span></div>
+    <div class="key-row"><kbd>SPACE</kbd><span>Assault Boost (таран)</span></div>
+    <div class="key-row"><kbd>C / TAB</kbd><span>Scan Mode</span></div>
+    <div class="key-row"><kbd>ESC</kbd><span>Пауза</span></div>
+  </div>
+</section>
+
+<footer>СИНТЕЗИРОВАННЫЙ ЗВУК // НОЛЬ ВНЕШНИХ АССЕТОВ // PYTHON → <b>WEBASSEMBLY</b> VIA PYGBAG</footer>
+
+<script>
+const overlay=document.getElementById('powerOverlay'),game=document.getElementById('game');
+function powerOn(){game.src=game.dataset.src;overlay.classList.add('off');}
+overlay.addEventListener('click',powerOn);
+document.getElementById('powerBtn').addEventListener('click',e=>{e.stopPropagation();powerOn();});
+document.getElementById('fsBtn').addEventListener('click',()=>{const f=document.getElementById('gameFrame');if(f.requestFullscreen)f.requestFullscreen();});
+const pc=document.getElementById('particles');
+for(let i=0;i<26;i++){const d=document.createElement('div');d.className='p';
+  d.style.left=Math.random()*100+'%';
+  d.style.background=Math.random()<.7?'#3ce6ff':'#ff8c1a';
+  d.style.animationDuration=(8+Math.random()*14)+'s';
+  d.style.animationDelay=(-Math.random()*20)+'s';
+  d.style.opacity=(0.15+Math.random()*0.4);pc.appendChild(d);}
+</script>
+</body>
+</html>
