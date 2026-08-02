@@ -2439,5 +2439,7 @@ def main():
             pass
         import time; time.sleep(30)
 
-if __name__ == '__main__':
+print('[AC2D] module loaded  __name__ =', __name__, ' WEB =', WEB)
+
+if (__name__ == '__main__') or WEB:
     main()
