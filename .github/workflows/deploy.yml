@@ -1,3 +1,4 @@
+# .github/workflows/deploy.yml
 name: Build & Deploy (gh-pages branch)
 
 on:
@@ -5,11 +6,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write   # нужно peaceiris, чтобы пушить ветку gh-pages
+
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -25,14 +27,23 @@ jobs:
 
       - name: Assemble site
         run: |
-          mkdir -p site/game
-          cp -r build/web/* site/game/
-          cp index.html site/index.html
+          mkdir -p site
+          if [ -f index.html ]; then
+            mkdir -p site/game
+            cp -r build/web/* site/game/
+            cp index.html site/index.html
+          else
+            cp -r build/web/* site/
+          fi
 
-      - name: Push site to gh-pages branch
+      - name: Push site to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./site
           publish_branch: gh-pages
           force: true
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
