@@ -30,13 +30,12 @@ MAP_W, MAP_H = 2400, 2400
 WAVES_M1 = [{'mt':4,'elite':0}, {'mt':5,'elite':1}, {'mt':6,'elite':2}]
 WAVES_M3 = [{'turret':2,'mt':4,'elite':0}, {'turret':2,'mt':4,'elite':1}]
 SCAN_MAX, SCAN_DRAIN, SCAN_CD = 4.0, 25.0, 3.5
-VERSION = "v0.3.0 // IMMOVABLE WALL"
+VERSION = "v0.3.1 // TRUE DUELIST"
 SAVE_FILE = "ac2d_save.json"
 _WIN_EVENT = getattr(pygame, 'WINDOWEVENT', None)
 _WIN_FOCUS_LOST = getattr(pygame, 'WINDOWEVENT_FOCUS_LOST', None)
 _ACTIVE_EVENT = getattr(pygame, 'ACTIVEEVENT', None)
 
-# ================= ЗВУК =================
 SR = 22050
 MUTED = False
 SND = {}
@@ -114,7 +113,6 @@ def start_music():
     if MUSIC and not MUTED:
         MUSIC.set_volume(0.10); MUSIC.play(loops=-1)
 
-# ================= GLOW =================
 GLOWS = {}
 def make_glow(col):
     s = pygame.Surface((64, 64), pygame.SRCALPHA)
@@ -132,7 +130,6 @@ def draw_glow(surf, x, y, size, name, alpha=255):
     sc = pygame.transform.scale(g, (int(size), int(size)))
     surf.blit(sc, (int(x-size/2), int(y-size/2)))
 
-# ================= ДЕТАЛИ =================
 PARTS = {
  'r_arm': {
    'rifle':  dict(n='ASSAULT RIFLE', cost=0,    w=30, cd=0.09, dmg=9,  stag=3,  encost=0, bspd=900, sz=2, col=C_YELLOW, knock=0,   desc='Rapid, low dmg'),
@@ -165,7 +162,7 @@ MISSIONS = [
  {'id':'m1','code':'MISSION 01','name':'HOSTILE SWEEP','reward':1000,'boss':True,'targets':0,'boss_id':'vindicta','waves':WAVES_M1,
   'obj':'Eliminate all MT waves. Defeat rival AC VINDICTA.',
   'brief':['Hostile MT squad detected in sector 7.','Commander-class units providing fire support.',
-           'Rival AC signature confirmed - VINDICTA, Heavy Cavalry ace.','Sweep the sector. Neutralize all hostiles.']},
+           'Rival AC signature confirmed - VINDICTA, a blade duelist.','It will dash at you with a blade. QB through it or clash.','Sweep the sector. Neutralize all hostiles.']},
  {'id':'m2','code':'MISSION 02','name':'PRIORITY TARGETS','reward':1800,'boss':False,'targets':3,'boss_id':None,'waves':None,
   'obj':'Destroy 3 marked GUNNER emplacements. Escorts are optional.',
   'brief':['Three gunner emplacements are shelling our positions.','They are marked as PRIORITY TARGETS.',
@@ -383,6 +380,11 @@ class Enemy(pygame.sprite.Sprite):
                 r = random.random()
                 self.mtype = 'striker' if r < 0.35 else ('rusher' if r < 0.60 else ('gunner' if r < 0.85 else 'mortar'))
         if is_boss:
+            self.duel_state = 'circle'
+            self.duel_timer = 0
+            self.dash_target = (0, 0)
+            self.blade_active = False
+            self.blade_hit_done = False
             if boss_id == 'bastion':
                 self.max_ap, self.max_stagger, self.spd, self.w = 3000, 350, 95, 60
                 self.bastion_shield = True
@@ -393,7 +395,7 @@ class Enemy(pygame.sprite.Sprite):
                 self.bastion_beam_ang = 0
                 self.bastion_enraged = False
             else:
-                self.max_ap, self.max_stagger, self.spd, self.w = 2000, 280, 240, 50
+                self.max_ap, self.max_stagger, self.spd, self.w = 2000, 280, 250, 50
         elif is_elite:
             self.max_ap, self.max_stagger, self.spd, self.w = 260, 95, 215, 22
         elif self.mtype == 'rusher':
@@ -447,7 +449,7 @@ class Enemy(pygame.sprite.Sprite):
         self.boss_en_max = 100
         self.boss_en = 100
         self.boss_qb_cd = 0
-        self.boss_blade_cd = 0
+        self.boss_blade_cd = 1.5
         self.boss_missile_cd = 2.0
         self.boss_burst_cd = 0
         self.boss_shotgun_cd = 0
@@ -462,7 +464,6 @@ class Enemy(pygame.sprite.Sprite):
         self.boss_ghosts = []
         self.boss_mode = 'ENGAGE'
     def take_damage(self, dmg, stag, game, col=C_YELLOW, bypass=False, src=None):
-        # Фронтальный щит BASTION
         if self.is_boss and self.boss_id=='bastion' and self.bastion_shield and self.stg_timer<=0 and src is not None:
             ang_to_src = math.atan2(src[1]-self.y, src[0]-self.x)
             diff = abs(ang_to_src - self.ang)
@@ -568,6 +569,213 @@ class Enemy(pygame.sprite.Sprite):
             if (plr.pvx*pdx + plr.pvy*pdy)/pd > 300:
                 return True
         return False
+    # ================= VINDICTA: ДУЭЛЯНТ =================
+    def boss_tick(self, dt, plr, bullets, game):
+        for attr in ('hit_flash','boss_blade_cd','boss_missile_cd','boss_burst_cd','boss_shotgun_cd','boss_muzzle','dodge_cd'):
+            if getattr(self, attr, 0) > 0: setattr(self, attr, getattr(self, attr)-dt)
+        if self.spawn_flash > 0: self.spawn_flash -= dt
+        self.boss_ghosts = [(x,y,a,t2-dt) for x,y,a,t2 in self.boss_ghosts if t2-dt > 0]
+        self.boss_orbit_t -= dt
+        if self.boss_orbit_t <= 0:
+            self.boss_orbit *= -1; self.boss_orbit_t = random.uniform(1.5, 3.0)
+        if self.duel_state not in ('blade_dash','reposition'):
+            self.boss_en = min(self.boss_en_max, self.boss_en + 20*dt)
+        if not self.phase2 and not self.phase2_trigger and self.ap < self.max_ap*0.5:
+            self.phase2_trigger = True
+            game.slowmo_timer = 2.0
+            game.slowmo_text = "VINDICTA: LIMITER RELEASED"
+            game.add_shake(12)
+            play('warning', 0.7)
+            self.ap = min(self.max_ap, self.ap + self.max_ap*0.08)
+        if self.phase2_trigger and not self.phase2 and game.slowmo_timer <= 0:
+            self.phase2 = True
+            game.slowmo_text = ""
+            game.add_float("DUELIST MODE", self.x, self.y-self.w-40, C_RED, big=True)
+        dx, dy = plr.x-self.x, plr.y-self.y
+        dist = math.hypot(dx,dy) or 1
+        self.ang = math.atan2(dy, dx)
+        cd_mult = 0.6 if self.phase2 else 1.0
+        spd_mult = 1.3 if self.phase2 else 1.0
+        player_vuln = plr.stalled or plr.scanning
+        if self.stg_timer > 0:
+            self.stg_timer -= dt
+            self.vx = self.vy = 0
+            if self.stg_timer <= 0 and self.boss_en >= 20:
+                self.duel_state = 'reposition'
+                self.duel_timer = 0.2
+                self.dash_dir = (-dx/dist, -dy/dist)
+                self.boss_en -= 20
+        else:
+            if self.duel_state == 'circle':
+                spd = self.spd * spd_mult
+                if dist > 420:
+                    self.vx, self.vy = dx/dist*spd, dy/dist*spd
+                elif dist < 280:
+                    self.vx, self.vy = -dx/dist*spd*0.7, -dy/dist*spd*0.7
+                else:
+                    px, py = -dy/dist, dx/dist
+                    self.vx, self.vy = px*spd*0.8*self.boss_orbit, py*spd*0.8*self.boss_orbit
+                if self.boss_en >= 18 and self.dodge_cd <= 0:
+                    for b in bullets:
+                        if b.owner != 'player': continue
+                        bdx, bdy = self.x-b.x, self.y-b.y
+                        bd = math.hypot(bdx, bdy)
+                        if bd < 170 and (b.vx*bdx + b.vy*bdy) > 0:
+                            perp = (-b.vy, b.vx); m = math.hypot(*perp) or 1
+                            side = random.choice([-1,1])
+                            self.dash_dir = (perp[0]/m*side, perp[1]/m*side)
+                            self.duel_state = 'reposition'; self.duel_timer = 0.18
+                            self.boss_en -= 18; self.dodge_cd = 1.4
+                            play('boost', 0.4)
+                            break
+                if self.duel_state == 'circle' and self.boss_en >= 18 and self.dodge_cd <= 0 and self.player_threat(plr) and dist < 300:
+                    px, py = -dy/dist, dx/dist
+                    side = random.choice([-1,1])
+                    self.dash_dir = (px*side, py*side)
+                    self.duel_state = 'reposition'; self.duel_timer = 0.2
+                    self.boss_en -= 18; self.dodge_cd = 1.4
+                    play('boost', 0.4)
+                if self.duel_state == 'circle':
+                    if self.boss_burst_cd <= 0 and dist < 620 and self.boss_burst_left <= 0:
+                        self.boss_burst_cd = 1.2*cd_mult; self.boss_burst_left = 4
+                    if self.boss_missile_cd <= 0 and self.boss_en >= 15 and dist > 420:
+                        self.boss_missile_cd = 5.0*cd_mult; self.boss_en -= 15
+                        for i in range(5):
+                            bullets.add(Missile(self.x, self.y, self.ang+random.uniform(-0.6,0.6), [plr], 'enemy'))
+                        play('missile', 0.5)
+                    if self.boss_blade_cd <= 0 and self.boss_en >= 25:
+                        if player_vuln and dist < 560:
+                            self.duel_state = 'blade_windup'; self.duel_timer = 0.15
+                            self.boss_blade_cd = 2.0*cd_mult
+                        elif dist < (560 if self.phase2 else 460):
+                            self.duel_state = 'blade_windup'; self.duel_timer = 0.25
+                            self.boss_blade_cd = 2.4*cd_mult
+            elif self.duel_state == 'blade_windup':
+                self.vx = self.vy = 0
+                self.duel_timer -= dt
+                if self.duel_timer <= 0:
+                    t = dist/920
+                    self.dash_target = (plr.x + plr.pvx*t*0.7, plr.y + plr.pvy*t*0.7)
+                    self.duel_state = 'blade_dash'
+                    self.duel_timer = 0.32
+                    self.boss_en -= 25
+                    self.blade_active = True
+                    self.blade_hit_done = False
+                    self.boss_blade_anim = 0.32
+                    play('blade', 0.7)
+            elif self.duel_state == 'blade_dash':
+                self.duel_timer -= dt
+                tdx, tdy = self.dash_target[0]-self.x, self.dash_target[1]-self.y
+                td = math.hypot(tdx,tdy) or 1
+                self.vx, self.vy = tdx/td*920, tdy/td*920
+                self.boss_ghosts.append((self.x, self.y, self.ang, 0.22))
+                self.boss_blade_anim = max(self.boss_blade_anim, 0.1)
+                if dist < 180 and not self.blade_hit_done:
+                    self.blade_hit_done = True
+                    if game.player.blade_timer > 0:
+                        game.hitstop = max(game.hitstop, 0.12)
+                        game.add_shake(8)
+                        game.rings.append({'x':(self.x+plr.x)/2,'y':(self.y+plr.y)/2,'r':15,'life':0.35,'col':C_YELLOW})
+                        for _ in range(20): game.particles.add(Particle((self.x+plr.x)/2,(self.y+plr.y)/2, C_YELLOW, 300))
+                        self.duel_state = 'recover'; self.duel_timer = 0.45
+                        self.blade_active = False
+                    else:
+                        game.hurt(35, self.x, self.y)
+                        game.add_shake(6)
+                if self.duel_timer <= 0 or td < 30:
+                    self.blade_active = False
+                    if self.duel_state == 'blade_dash':
+                        self.duel_state = 'recover'; self.duel_timer = 0.35
+            elif self.duel_state == 'recover':
+                self.duel_timer -= dt
+                self.vx *= 0.85; self.vy *= 0.85
+                if self.duel_timer <= 0:
+                    if dist < 250 and self.boss_en >= 15:
+                        self.duel_state = 'reposition'; self.duel_timer = 0.2
+                        px, py = -dy/dist, dx/dist
+                        side = random.choice([-1,1])
+                        self.dash_dir = (px*side, py*side)
+                        self.boss_en -= 15
+                    else:
+                        self.duel_state = 'circle'
+            elif self.duel_state == 'reposition':
+                self.duel_timer -= dt
+                if self.dash_dir:
+                    self.vx, self.vy = self.dash_dir[0]*860, self.dash_dir[1]*860
+                    self.boss_ghosts.append((self.x, self.y, self.ang, 0.18))
+                if self.duel_timer <= 0:
+                    self.dash_dir = None
+                    self.duel_state = 'circle'
+            if self.boss_burst_left > 0 and self.duel_state == 'circle':
+                self.boss_burst_t -= dt
+                if self.boss_burst_t <= 0:
+                    self.boss_burst_t = 0.09
+                    self.boss_burst_left -= 1
+                    ang = self.aim_angle(plr, 560, 0.5) + random.uniform(-0.03,0.03)
+                    bullets.add(Bullet(self.x, self.y, ang, 560, 8, 3, C_RED, 'enemy', 3))
+                    self.boss_muzzle = 0.05
+                    play('rifle', 0.3)
+        self.x += self.vx*dt; self.y += self.vy*dt
+        self.x = clamp(self.x, 40, MAP_W-40); self.y = clamp(self.y, 40, MAP_H-40)
+        self.rect.center = (self.x, self.y)
+    def boss_draw(self, surf, cam, scan_mode=False, t=0):
+        cx, cy = self.x-cam[0], self.y-cam[1]
+        s = 1.9
+        flash = self.hit_flash > 0 or (self.stg_timer>0 and int(self.stg_timer*10)%2)
+        p2 = self.phase2
+        windup = self.duel_state == 'blade_windup'
+        dashing = self.duel_state == 'blade_dash'
+        recovering = self.duel_state == 'recover'
+        body_col = (160,160,170) if flash else (100,60,60)
+        if recovering: body_col = tuple(max(0,c-35) for c in body_col)
+        dark = tuple(max(0,c-55) for c in body_col)
+        accent = C_RED if p2 else C_ORANGE
+        body = [(-22,-18),(14,-20),(30,0),(14,20),(-22,18)]
+        def poly(pts, col, width=0):
+            pygame.draw.polygon(surf, col, rot_pts(cx, cy, [(x*s,y*s) for x,y in pts], self.ang), width)
+        for gx,gy,ga,gt in self.boss_ghosts:
+            a = clamp(gt/0.22,0,1)
+            pygame.draw.polygon(surf, (int(95*a),int(45*a),int(45*a)), rot_pts(gx-cam[0],gy-cam[1],[(x*s,y*s) for x,y in body], ga))
+        if abs(self.vx)+abs(self.vy)>30 or dashing:
+            for side in (-1,1):
+                poly([(-24,side*13),(-36-random.randint(0,8),side*11),(-24,side*9)], accent)
+            draw_glow(surf, cx-math.cos(self.ang)*40, cy-math.sin(self.ang)*40, 55, 'orange' if not p2 else 'red', 130)
+        for side in (-1,1):
+            poly([(-20,side*16),(-4,side*16),(-4,side*8),(-20,side*8)], dark)
+        poly(body, dark)
+        poly([(-20,-16),(12,-18),(27,0),(12,18),(-20,16)], body_col)
+        poly([(-12,-10),(8,-11),(18,0),(8,11),(-12,10)], tuple(min(255,c+30) for c in body_col))
+        poly(body, (40,25,25), 2)
+        for side in (-1,1):
+            poly([(-14,side*18),(2,side*18),(2,side*26),(-14,side*26)], dark)
+            pygame.draw.circle(surf, accent, rot_pts(cx,cy,[(-6,side*22)],self.ang)[0], int(3*s))
+        poly([(14,-6),(28,0),(14,6)], C_RED if p2 else C_YELLOW)
+        draw_glow(surf, cx+math.cos(self.ang)*38, cy+math.sin(self.ang)*38, 30, 'red' if p2 else 'yellow', 120)
+        poly([(16,6),(44,6),(44,12),(16,12)], (80,80,90))
+        blade_col = C_CYAN if (windup or dashing) else (C_ORANGE if p2 else (180,190,210))
+        blade = [(20,-14),(56,-10),(58,-4),(22,-6)]
+        poly(blade, blade_col)
+        if windup or dashing:
+            poly(blade, C_WHITE, 1)
+            draw_glow(surf, cx+math.cos(self.ang)*55, cy+math.sin(self.ang)*55, 50, 'cyan', 150)
+            if windup:
+                ex, ey = math.cos(self.ang)*300, math.sin(self.ang)*300
+                pygame.draw.line(surf, C_CYAN, (cx,cy),(cx+ex,cy+ey), 2)
+        if self.boss_muzzle > 0:
+            gx, gy = rot_pts(cx,cy,[(46*s,9*s)],self.ang)[0]
+            draw_glow(surf, gx, gy, 40, 'yellow', 180)
+            pygame.draw.circle(surf, C_YELLOW, (int(gx),int(gy)), random.randint(4,7))
+        if self.spawn_flash > 0:
+            pygame.draw.circle(surf, C_RED, (int(cx),int(cy)), max(1,int((0.8-self.spawn_flash)*220)), 3)
+        if scan_mode:
+            pygame.draw.polygon(surf, C_RED, rot_pts(cx,cy,[(x*s*1.15,y*s*1.15) for x,y in body],self.ang), 3)
+            if self.stg_timer>0:
+                surf.blit(F_TINY.render("WEAK POINT", True, C_RED), (cx-42, cy-self.w-26))
+        if self.boss_en < 20 and int(pygame.time.get_ticks()/200)%2:
+            surf.blit(F_TINY.render("GUARD DOWN", True, C_YELLOW), (cx-44, cy-self.w-42))
+        state_lbl = {'circle':'CIRCLE','blade_windup':'WINDUP','blade_dash':'BLADE DASH','recover':'RECOVER','reposition':'REPOSITION'}.get(self.duel_state,'')
+        lbl = F_TINY.render(state_lbl + (" // LIMITER" if p2 else ""), True, C_RED if p2 else C_DIM)
+        surf.blit(lbl, (cx-lbl.get_width()//2, cy+self.w+8))
     # ================= BASTION =================
     def fire_beam(self, game, plr):
         dx, dy = math.cos(self.bastion_beam_ang), math.sin(self.bastion_beam_ang)
@@ -709,187 +917,6 @@ class Enemy(pygame.sprite.Sprite):
         else:
             wob = math.sin(game.time*1.2 + self.phase)
             self.vx, self.vy = px*spd*0.4*wob, py*spd*0.4*wob
-    def boss_decide(self, plr, game, dist):
-        if self.boss_en >= 20 and self.boss_qb_cd <= 0 and self.qb_timer <= 0:
-            if self.player_threat(plr): return 'DODGE'
-            for b in game.bullets:
-                if b.owner != 'player': continue
-                bdx, bdy = self.x-b.x, self.y-b.y
-                if math.hypot(bdx, bdy) < 140 and (b.vx*bdx + b.vy*bdy) > 0:
-                    return 'DODGE'
-        if plr.stalled and dist > 180 and self.boss_en >= 30:
-            return 'PUNISH'
-        return 'ENGAGE'
-    def boss_move(self, behavior, plr, game, dist, dx, dy, dt):
-        nx, ny = dx/dist, dy/dist
-        px, py = -ny, nx
-        spd = self.spd*(1.28 if self.phase2 else 1)
-        if self.qb_timer > 0:
-            self.qb_timer -= dt
-            if self.dash_dir:
-                self.vx, self.vy = self.dash_dir[0]*880, self.dash_dir[1]*880
-                self.boss_ghosts.append((self.x, self.y, self.ang, 0.22))
-            if self.qb_timer <= 0: self.dash_dir = None
-            return
-        if self.boss_ab > 0:
-            self.boss_ab -= dt
-            self.boss_en -= 45*dt
-            self.vx, self.vy = nx*700, ny*700
-            game.particles.add(Particle(self.x-nx*30, self.y-ny*30, C_ORANGE, 90))
-            self.boss_ghosts.append((self.x, self.y, self.ang, 0.15))
-            if self.boss_en <= 0: self.boss_ab = 0
-            return
-        if behavior == 'DODGE':
-            if self.boss_qb_cd <= 0 and self.boss_en >= 20:
-                side = random.choice([-1, 1])
-                self.dash_dir = (px*side, py*side)
-                self.qb_timer = 0.22
-                self.boss_en -= 20
-                self.boss_qb_cd = 2.2
-                play('boost', 0.4)
-            self.vx, self.vy = 0, 0
-        elif behavior == 'PUNISH':
-            if self.boss_ab <= 0 and self.boss_en >= 30 and dist > 180:
-                self.boss_ab = 0.5
-                play('boost', 0.5)
-            self.vx, self.vy = nx*spd*1.2, ny*spd*1.2
-        elif self.phase2:
-            if dist > 150:
-                self.vx, self.vy = nx*spd*1.2, ny*spd*1.2
-            else:
-                self.vx, self.vy = px*spd*0.7*self.boss_orbit, py*spd*0.7*self.boss_orbit
-        else:
-            if dist < 320: self.vx, self.vy = -nx*spd, -ny*spd
-            elif dist > 480: self.vx, self.vy = nx*spd, ny*spd
-            else: self.vx, self.vy = px*spd*0.6*self.boss_orbit, py*spd*0.6*self.boss_orbit
-    def boss_act(self, behavior, plr, game, dist, bullets, dt):
-        if behavior == 'DODGE': return
-        if self.boss_burst_left > 0:
-            self.boss_burst_t -= dt
-            if self.boss_burst_t <= 0:
-                self.boss_burst_t = 0.09
-                self.boss_burst_left -= 1
-                ang = self.aim_angle(plr, 560, 0.5) + random.uniform(-0.03, 0.03)
-                bullets.add(Bullet(self.x, self.y, ang, 560, 8, 3, C_RED, 'enemy', 3))
-                self.boss_muzzle = 0.05
-                play('rifle', 0.3)
-        if self.phase2:
-            if dist < 190 and self.boss_blade_cd <= 0 and self.boss_en >= 30:
-                self.boss_blade_cd = 2.0; self.boss_en -= 30
-                self.boss_blade_anim = 0.3; self.boss_blade_pending = 0.15
-                game.add_shake(4)
-                play('blade', 0.6)
-            if dist < 220 and self.boss_shotgun_cd <= 0 and self.boss_en >= 15:
-                self.boss_shotgun_cd = 2.4; self.boss_en -= 15
-                for i in range(5):
-                    bullets.add(Bullet(self.x, self.y, self.ang+(i-2)*0.1, 650, 12, 6, C_RED, 'enemy', 4))
-                self.boss_muzzle = 0.06
-                play('shotgun', 0.5)
-        else:
-            if self.boss_burst_cd <= 0 and dist < 600 and self.boss_burst_left <= 0:
-                self.boss_burst_cd = 1.5; self.boss_burst_left = 4
-            if self.boss_missile_cd <= 0 and self.boss_en >= 15 and dist > 250:
-                self.boss_missile_cd = 6.0; self.boss_en -= 15
-                for i in range(5):
-                    bullets.add(Missile(self.x, self.y, self.ang+random.uniform(-0.6,0.6), [plr], 'enemy'))
-                play('missile', 0.5)
-    def boss_tick(self, dt, plr, bullets, game):
-        for attr in ('hit_flash','boss_qb_cd','boss_blade_cd','boss_missile_cd','boss_burst_cd','boss_shotgun_cd','boss_muzzle','boss_blade_anim'):
-            if getattr(self, attr) > 0: setattr(self, attr, getattr(self, attr)-dt)
-        if self.spawn_flash > 0: self.spawn_flash -= dt
-        self.boss_ghosts = [(x,y,a,t2-dt) for x,y,a,t2 in self.boss_ghosts if t2-dt > 0]
-        self.boss_orbit_t -= dt
-        if self.boss_orbit_t <= 0:
-            self.boss_orbit *= -1; self.boss_orbit_t = random.uniform(2, 4)
-        if self.qb_timer <= 0 and self.boss_ab <= 0:
-            self.boss_en = min(self.boss_en_max, self.boss_en + 18*dt)
-        if not self.phase2 and not self.phase2_trigger and self.ap < self.max_ap*0.5:
-            self.phase2_trigger = True
-            game.slowmo_timer = 2.0
-            game.slowmo_text = "VINDICTA: LIMITER RELEASED"
-            game.add_shake(12)
-            play('warning', 0.7)
-            self.ap = min(self.max_ap, self.ap + self.max_ap*0.08)
-        if self.phase2_trigger and not self.phase2 and game.slowmo_timer <= 0:
-            self.phase2 = True
-            game.slowmo_text = ""
-            game.add_float("BLADE MODE", self.x, self.y-self.w-40, C_RED, big=True)
-        dx, dy = plr.x-self.x, plr.y-self.y
-        dist = math.hypot(dx, dy) or 1
-        self.ang = math.atan2(dy, dx)
-        if self.stg_timer > 0:
-            self.stg_timer -= dt
-            self.vx = self.vy = 0
-            if self.stg_timer <= 0 and self.boss_en >= 20:
-                self.qb_timer = 0.25
-                self.dash_dir = (-dx/dist, -dy/dist)
-                self.boss_en -= 20; self.boss_qb_cd = 2.0
-        else:
-            behavior = self.boss_decide(plr, game, dist)
-            self.boss_mode = behavior
-            self.boss_move(behavior, plr, game, dist, dx, dy, dt)
-            self.boss_act(behavior, plr, game, dist, bullets, dt)
-        if self.boss_blade_pending > 0:
-            self.boss_blade_pending -= dt
-            if self.boss_blade_pending <= 0:
-                if math.hypot(plr.x-self.x, plr.y-self.y) < 185:
-                    game.hurt(30, self.x, self.y)
-                    game.hitstop = max(game.hitstop, 0.05)
-        self.x += self.vx*dt; self.y += self.vy*dt
-        self.x = clamp(self.x, 40, MAP_W-40); self.y = clamp(self.y, 40, MAP_H-40)
-        self.rect.center = (self.x, self.y)
-    def boss_draw(self, surf, cam, scan_mode=False, t=0):
-        cx, cy = self.x-cam[0], self.y-cam[1]
-        s = 1.9
-        flash = self.hit_flash > 0 or (self.stg_timer > 0 and int(self.stg_timer*10) % 2)
-        p2 = self.phase2
-        body_col = (160,160,170) if flash else (100,60,60)
-        dark = tuple(max(0,c-55) for c in body_col)
-        accent = C_RED if p2 else C_ORANGE
-        body = [(-22,-18),(14,-20),(30,0),(14,20),(-22,18)]
-        def poly(pts, col, width=0):
-            pygame.draw.polygon(surf, col, rot_pts(cx, cy, [(x*s,y*s) for x,y in pts], self.ang), width)
-        for gx, gy, ga, gt in self.boss_ghosts:
-            a = clamp(gt/0.22, 0, 1)
-            pygame.draw.polygon(surf, (int(95*a), int(45*a), int(45*a)), rot_pts(gx-cam[0], gy-cam[1], [(x*s,y*s) for x,y in body], ga))
-        if abs(self.vx)+abs(self.vy) > 30 or self.qb_timer > 0 or self.boss_ab > 0:
-            for side in (-1,1):
-                poly([(-24, side*13), (-36-random.randint(0,8), side*11), (-24, side*9)], accent)
-            draw_glow(surf, cx-math.cos(self.ang)*40, cy-math.sin(self.ang)*40, 55, 'orange' if not p2 else 'red', 130)
-        for side in (-1,1):
-            poly([(-20, side*16), (-4, side*16), (-4, side*8), (-20, side*8)], dark)
-        poly(body, dark)
-        poly([(-20,-16),(12,-18),(27,0),(12,18),(-20,16)], body_col)
-        poly([(-12,-10),(8,-11),(18,0),(8,11),(-12,10)], tuple(min(255,c+30) for c in body_col))
-        poly(body, (40,25,25), 2)
-        for side in (-1,1):
-            poly([(-14, side*18), (2, side*18), (2, side*26), (-14, side*26)], dark)
-            pygame.draw.circle(surf, accent, rot_pts(cx,cy,[(-6,side*22)],self.ang)[0], int(3*s))
-        poly([(14,-6),(28,0),(14,6)], C_RED if p2 else C_YELLOW)
-        draw_glow(surf, cx+math.cos(self.ang)*38, cy+math.sin(self.ang)*38, 30, 'red' if p2 else 'yellow', 120)
-        if p2:
-            blade = [(20,8),(58,2),(60,10),(22,16)]
-            poly(blade, C_ORANGE); poly(blade, C_YELLOW, 1)
-            if self.boss_blade_anim > 0:
-                poly([(0,-34),(70,-70),(78,0),(70,70),(0,34)], C_ORANGE, 3)
-                draw_glow(surf, cx+math.cos(self.ang)*70, cy+math.sin(self.ang)*70, 80, 'orange', 100)
-        else:
-            poly([(16,6),(44,6),(44,12),(16,12)], (80,80,90))
-            pygame.draw.line(surf, (60,60,70), rot_pts(cx,cy,[(-18*s,-14*s)],self.ang)[0], rot_pts(cx,cy,[(-2*s,-30*s)],self.ang)[0], 3)
-        if self.boss_muzzle > 0:
-            gx, gy = rot_pts(cx,cy,[(46*s,9*s)],self.ang)[0]
-            draw_glow(surf, gx, gy, 40, 'yellow', 180)
-            pygame.draw.circle(surf, C_YELLOW, (int(gx),int(gy)), random.randint(4,7))
-        if self.spawn_flash > 0:
-            pygame.draw.circle(surf, C_RED, (int(cx),int(cy)), max(1,int((0.8-self.spawn_flash)*220)), 3)
-        if scan_mode:
-            pygame.draw.polygon(surf, C_RED, rot_pts(cx,cy,[(x*s*1.15,y*s*1.15) for x,y in body],self.ang), 3)
-            if self.stg_timer > 0:
-                surf.blit(F_TINY.render("WEAK POINT", True, C_RED), (cx-42, cy-self.w-26))
-        if self.boss_en < 20 and int(pygame.time.get_ticks()/200) % 2:
-            surf.blit(F_TINY.render("GUARD DOWN", True, C_YELLOW), (cx-44, cy-self.w-42))
-        lbl = F_TINY.render(self.boss_mode + (" // BLADE" if p2 else ""), True, C_RED if p2 else C_DIM)
-        surf.blit(lbl, (cx-lbl.get_width()//2, cy+self.w+8))
     def elite_decide(self, plr, game, dist):
         if self.stg_timer > 0: return 'IDLE'
         if not self.barrier_active: return 'RETREAT'
@@ -1637,7 +1664,6 @@ class Game:
             r.hunt_ang = (i/max(1,len(rushers)))*2*math.pi + self.flank_phase*1.6
         self.flank_phase += dt*0.12
         if m['targets'] > 0:
-            # Миссия 2: приоритетные цели
             if not self.m2_spawned:
                 self.m2_spawned = True
                 for _ in range(m['targets']):
@@ -1662,7 +1688,6 @@ class Game:
                 self.m2_reinf = 7.0
                 for _ in range(2): self.enemies.add(Enemy(*self.rand_far()))
         elif m['boss']:
-            # Волновые миссии (1 и 3)
             waves = m['waves']
             if not self.boss_spawned:
                 if len(self.enemies) == 0:
@@ -1686,7 +1711,7 @@ class Game:
                             b = Enemy(MAP_W/2+500, MAP_H/2, is_boss=True, boss_id=m['boss_id'])
                             self.enemies.add(b)
                             self.boss_spawned = True
-                            self.banner = "WARNING: " + ("FORTRESS AC BASTION" if m['boss_id']=='bastion' else "RIVAL AC DETECTED")
+                            self.banner = "WARNING: " + ("FORTRESS AC BASTION" if m['boss_id']=='bastion' else "RIVAL AC VINDICTA")
                             self.banner_timer = 3.0
                             self.bosscard = 2.5
                             self.slowmo_timer = max(self.slowmo_timer, 0.6)
@@ -1901,7 +1926,7 @@ class Game:
                 t2 = F_SM.render("FORTRESS AC // IMMOVABLE WALL", True, C_RED)
             else:
                 t1 = F_BIG.render("VINDICTA", True, C_YELLOW)
-                t2 = F_SM.render("HEAVY CAVALRY // ACE PILOT", True, C_RED)
+                t2 = F_SM.render("HEAVY CAVALRY // ACE DUELIST", True, C_RED)
             t1.set_alpha(int(255*a)); t2.set_alpha(int(255*a))
             surf.blit(t1, (W//2-t1.get_width()//2, cy0-30))
             surf.blit(t2, (W//2-t2.get_width()//2, cy0+30))
@@ -1965,7 +1990,8 @@ class Game:
                 pygame.draw.rect(surf, (35,38,48), (W//2-bw//2-2,51,bw+4,6))
                 ben_col = (255,80,80) if boss.boss_en < 20 and int(t*5)%2 else C_BLUE
                 pygame.draw.rect(surf, ben_col, (W//2-bw//2,52,bw*clamp(boss.boss_en/boss.boss_en_max,0,1),4))
-                surf.blit(F_SM.render("VINDICTA // BLADE MODE" if boss.phase2 else "VINDICTA // HEAVY CAVALRY", True, C_YELLOW), (W//2-bw//2, 60))
+                dsl = {'circle':'CIRCLE','blade_windup':'WINDUP','blade_dash':'BLADE DASH','recover':'RECOVER','reposition':'REPOSITION'}.get(boss.duel_state,'')
+                surf.blit(F_SM.render("VINDICTA // " + ("LIMITER " if boss.phase2 else "") + dsl, True, C_YELLOW), (W//2-bw//2, 60))
         p = self.player
         msl_rdy = p.missile_cd <= 0 and p.missile_ammo >= 4 and p.en >= 20
         bld_rdy = p.blade_cd <= 0 and p.en >= 45
@@ -2035,7 +2061,7 @@ def draw_title(surf, t, motes, campaign_done):
     pygame.draw.polygon(surf, C_RED, [(ex, ey-28),(ex+24, ey+16),(ex-24, ey+16)])
     ttl = F_TITLE.render("ARMORED CORE", True, C_WHITE)
     surf.blit(ttl, (W//2 - ttl.get_width()//2, 230))
-    sub = F_MED.render("2 D   //   I M M O V A B L E   W A L L", True, C_CYAN)
+    sub = F_MED.render("2 D   //   T R U E   D U E L I S T", True, C_CYAN)
     surf.blit(sub, (W//2 - sub.get_width()//2, 340))
     pygame.draw.line(surf, C_CYAN, (W//2-320, 395),(W//2+320, 395), 2)
     if campaign_done:
