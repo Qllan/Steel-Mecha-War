@@ -1,11 +1,15 @@
-import pygame, math, random, sys, array, json, os
+import pygame, math, random, sys, array, json, os, traceback
 
-try:
-    pygame.mixer.pre_init(22050, -16, 1, 512)
-    pygame.init()
-    pygame.mixer.init()
-except Exception:
-    pygame.init()
+# ================= ВЕБ-ФЛАГ И БЕЗОПАСНЫЙ СТАРТ =================
+WEB = (sys.platform == 'emscripten')   # True только в веб-сборке pygbag
+
+if not WEB:                            # в вебе mixer НЕ трогаем вообще
+    try: pygame.mixer.pre_init(22050, -16, 1, 512)
+    except Exception: pass
+pygame.init()
+if not WEB:
+    try: pygame.mixer.init()
+    except Exception: pass
 
 W, H = 1280, 720
 screen = pygame.display.set_mode((W, H))
@@ -68,6 +72,8 @@ def _snd(samples):
 
 def build_audio():
     global MUSIC
+    if WEB:                            # в вебе звук отключён — тихо и безопасно
+        return
     try:
         SND['boot']    = _snd(_seq((110,0,0.12,0.5,'sine'),(220,0.08,0.12,0.5,'sine'),(330,0.16,0.14,0.5,'sine'),(440,0.24,0.3,0.6,'sine'),(660,0.24,0.3,0.3,'sine')))
         SND['ui']      = _snd(_seq((880,0,0.05,0.25,'square')))
@@ -119,10 +125,6 @@ def start_music():
             MUSIC.set_volume(0.10); MUSIC.play(loops=-1)
         except Exception:
             pass
-
-def start_music():
-    if MUSIC and not MUTED:
-        MUSIC.set_volume(0.10); MUSIC.play(loops=-1)
 
 GLOWS = {}
 def make_glow(col):
@@ -580,7 +582,6 @@ class Enemy(pygame.sprite.Sprite):
             if (plr.pvx*pdx + plr.pvy*pdy)/pd > 300:
                 return True
         return False
-    # ================= VINDICTA: ДУЭЛЯНТ =================
     def boss_tick(self, dt, plr, bullets, game):
         for attr in ('hit_flash','boss_blade_cd','boss_missile_cd','boss_burst_cd','boss_shotgun_cd','boss_muzzle','dodge_cd'):
             if getattr(self, attr, 0) > 0: setattr(self, attr, getattr(self, attr)-dt)
@@ -787,7 +788,6 @@ class Enemy(pygame.sprite.Sprite):
         state_lbl = {'circle':'CIRCLE','blade_windup':'WINDUP','blade_dash':'BLADE DASH','recover':'RECOVER','reposition':'REPOSITION'}.get(self.duel_state,'')
         lbl = F_TINY.render(state_lbl + (" // LIMITER" if p2 else ""), True, C_RED if p2 else C_DIM)
         surf.blit(lbl, (cx-lbl.get_width()//2, cy+self.w+8))
-    # ================= BASTION =================
     def fire_beam(self, game, plr):
         dx, dy = math.cos(self.bastion_beam_ang), math.sin(self.bastion_beam_ang)
         game.beams.append({'x1':self.x+dx*40,'y1':self.y+dy*40,'x2':self.x+dx*900,'y2':self.y+dy*900,'life':0.3,'ml':0.3,'col':C_RED,'wide':True})
@@ -897,7 +897,6 @@ class Enemy(pygame.sprite.Sprite):
                 surf.blit(F_TINY.render("WEAK POINT", True, C_RED), (cx-42, cy-self.w-26))
         if enraged and int(t*5)%2:
             surf.blit(F_TINY.render("ENRAGED", True, C_RED), (cx-30, cy-self.w-42))
-    # ===========================================
     def guard_move(self, plr, game, spd):
         t = self.guard_of
         gdx, gdy = plr.x - t.x, plr.y - t.y
@@ -1506,6 +1505,7 @@ class Game:
         self.load()
         self.reset()
     def save(self):
+        if WEB: return                 # BrowserFS нет — не пишем на диск
         try:
             data = {'credits':self.credits, 'owned':list(self.owned), 'config':self.config,
                     'best_rank':{str(k):v for k,v in self.best_rank.items()},
@@ -1515,6 +1515,7 @@ class Game:
         except Exception:
             pass
     def load(self):
+        if WEB: return                 # и не читаем — стартуем с дефолтом
         try:
             with open(SAVE_FILE) as f: d = json.load(f)
             self.credits = d.get('credits', 0)
@@ -2206,221 +2207,237 @@ def draw_pause(surf, sel):
     surf.blit(F_TINY.render("ESC resume   R restart   H help   F8 mute", True, C_DIM), (W//2-200, 520))
 
 def main():
-    build_audio()
-    build_glows()
-    state = 'START'
-    game = Game()
-    pause_sel = 0
-    mission_sel = 0
-    brief_t = 0.0
-    running = True
-    gt = 0.0
-    boot_played = False
-    music_started = False
-    while running:
-        dt = clock.tick(60) / 1000.0
-        gt += dt
-        if game.save_flash > 0: game.save_flash -= dt
-        if state == 'START' and not boot_played:
-            play('boot', 0.9)
-            boot_played = True
-        if state == 'PLAYING' and not music_started:
-            start_music()
-            music_started = True
-        if state != 'PLAYING' and music_started:
-            if MUSIC: MUSIC.stop()
-            music_started = False
-        if state == 'START':
-            for mo in game.motes:
-                mo['x'] += mo['vx']*dt; mo['y'] += mo['vy']*dt
-                if mo['y'] < -5: mo['y'] = H+5; mo['x'] = random.randint(0, W)
-                if mo['x'] < -5: mo['x'] = W+5
-                if mo['x'] > W+5: mo['x'] = -5
-        if game.buy_flash > 0: game.buy_flash -= dt
-        if game.deny_flash > 0: game.deny_flash -= dt
-        keys = pygame.key.get_pressed()
-        mouse_pos = pygame.mouse.get_pos()
-        mouse_btn = pygame.mouse.get_pressed()
-        for e in pygame.event.get():
-            if e.type == pygame.QUIT:
-                game.save()
-                running = False
-            if _WIN_EVENT is not None and e.type == _WIN_EVENT and getattr(e,'event',None) == _WIN_FOCUS_LOST and state == 'PLAYING':
-                state = 'PAUSED'; pause_sel = 0
-            elif _ACTIVE_EVENT is not None and e.type == _ACTIVE_EVENT and getattr(e,'gain',1) == 0 and state == 'PLAYING':
-                state = 'PAUSED'; pause_sel = 0
-            if e.type == pygame.KEYDOWN:
-                if e.key == pygame.K_F8:
-                    MUTED = not MUTED
-                    if MUTED and MUSIC: MUSIC.stop()
-                    elif not MUTED and state == 'PLAYING': start_music()
-                if state == 'START' and e.key == pygame.K_SPACE:
-                    state = 'GARAGE'
-                    play('confirm', 0.7)
-                elif state == 'GARAGE':
-                    slot = SLOT_ORDER[game.garage_sel]
-                    parts = list(PARTS[slot].keys())
-                    if e.key == pygame.K_UP:
-                        game.garage_sel = (game.garage_sel-1) % 4; play('ui', 0.5)
-                    elif e.key == pygame.K_DOWN:
-                        game.garage_sel = (game.garage_sel+1) % 4; play('ui', 0.5)
-                    elif e.key in (pygame.K_LEFT, pygame.K_RIGHT):
-                        ni = (game.garage_idx[slot] + (1 if e.key == pygame.K_RIGHT else -1)) % len(parts)
-                        game.garage_idx[slot] = ni
-                        npid = parts[ni]
-                        np = PARTS[slot][npid]
-                        lk = (np.get('unlock') and not game.rail_unlocked) or (np.get('unlock_campaign') and not game.campaign_done)
-                        if npid in game.owned and not lk:
-                            game.config[slot] = npid
-                        play('ui', 0.5)
-                    elif e.key == pygame.K_RETURN:
-                        pid = parts[game.garage_idx[slot]]
-                        p = PARTS[slot][pid]
-                        locked = (p.get('unlock') and not game.rail_unlocked) or (p.get('unlock_campaign') and not game.campaign_done)
-                        if pid not in game.owned and not locked:
-                            if game.credits >= p['cost']:
-                                game.credits -= p['cost']
-                                game.owned.add(pid)
+    try:
+        print('[AC2D] boot  WEB =', WEB, ' pygame', pygame.ver)
+        build_audio();  print('[AC2D] audio ok')
+        build_glows();  print('[AC2D] glows ok')
+        state = 'START'
+        game = Game();  print('[AC2D] game constructed')
+        pause_sel = 0
+        mission_sel = 0
+        brief_t = 0.0
+        running = True
+        gt = 0.0
+        boot_played = False
+        music_started = False
+        print('[AC2D] entering main loop')
+        while running:
+            dt = clock.tick(60) / 1000.0
+            gt += dt
+            if game.save_flash > 0: game.save_flash -= dt
+            if state == 'START' and not boot_played:
+                play('boot', 0.9)
+                boot_played = True
+            if state == 'PLAYING' and not music_started:
+                start_music()
+                music_started = True
+            if state != 'PLAYING' and music_started:
+                if MUSIC: MUSIC.stop()
+                music_started = False
+            if state == 'START':
+                for mo in game.motes:
+                    mo['x'] += mo['vx']*dt; mo['y'] += mo['vy']*dt
+                    if mo['y'] < -5: mo['y'] = H+5; mo['x'] = random.randint(0, W)
+                    if mo['x'] < -5: mo['x'] = W+5
+                    if mo['x'] > W+5: mo['x'] = -5
+            if game.buy_flash > 0: game.buy_flash -= dt
+            if game.deny_flash > 0: game.deny_flash -= dt
+            keys = pygame.key.get_pressed()
+            mouse_pos = pygame.mouse.get_pos()
+            mouse_btn = pygame.mouse.get_pressed()
+            for e in pygame.event.get():
+                if e.type == pygame.QUIT:
+                    game.save()
+                    running = False
+                if _WIN_EVENT is not None and e.type == _WIN_EVENT and getattr(e,'event',None) == _WIN_FOCUS_LOST and state == 'PLAYING':
+                    state = 'PAUSED'; pause_sel = 0
+                elif _ACTIVE_EVENT is not None and e.type == _ACTIVE_EVENT and getattr(e,'gain',1) == 0 and state == 'PLAYING':
+                    state = 'PAUSED'; pause_sel = 0
+                if e.type == pygame.KEYDOWN:
+                    if e.key == pygame.K_F8:
+                        MUTED = not MUTED
+                        if MUTED and MUSIC: MUSIC.stop()
+                        elif not MUTED and state == 'PLAYING': start_music()
+                    if state == 'START' and e.key == pygame.K_SPACE:
+                        state = 'GARAGE'
+                        play('confirm', 0.7)
+                    elif state == 'GARAGE':
+                        slot = SLOT_ORDER[game.garage_sel]
+                        parts = list(PARTS[slot].keys())
+                        if e.key == pygame.K_UP:
+                            game.garage_sel = (game.garage_sel-1) % 4; play('ui', 0.5)
+                        elif e.key == pygame.K_DOWN:
+                            game.garage_sel = (game.garage_sel+1) % 4; play('ui', 0.5)
+                        elif e.key in (pygame.K_LEFT, pygame.K_RIGHT):
+                            ni = (game.garage_idx[slot] + (1 if e.key == pygame.K_RIGHT else -1)) % len(parts)
+                            game.garage_idx[slot] = ni
+                            npid = parts[ni]
+                            np = PARTS[slot][npid]
+                            lk = (np.get('unlock') and not game.rail_unlocked) or (np.get('unlock_campaign') and not game.campaign_done)
+                            if npid in game.owned and not lk:
+                                game.config[slot] = npid
+                            play('ui', 0.5)
+                        elif e.key == pygame.K_RETURN:
+                            pid = parts[game.garage_idx[slot]]
+                            p = PARTS[slot][pid]
+                            locked = (p.get('unlock') and not game.rail_unlocked) or (p.get('unlock_campaign') and not game.campaign_done)
+                            if pid not in game.owned and not locked:
+                                if game.credits >= p['cost']:
+                                    game.credits -= p['cost']
+                                    game.owned.add(pid)
+                                    game.config[slot] = pid
+                                    game.buy_flash = 1.0
+                                    game.save()
+                                    play('confirm', 0.8)
+                                else:
+                                    game.deny_flash = 1.0
+                                    play('deny', 0.7)
+                            elif pid in game.owned:
                                 game.config[slot] = pid
-                                game.buy_flash = 1.0
-                                game.save()
+                                play('confirm', 0.6)
+                        elif e.key == pygame.K_m:
+                            state = 'MISSIONS'; mission_sel = 0
+                            play('confirm', 0.7)
+                    elif state == 'MISSIONS':
+                        if e.key == pygame.K_UP:
+                            mission_sel = (mission_sel-1) % len(MISSIONS); play('ui', 0.5)
+                        elif e.key == pygame.K_DOWN:
+                            mission_sel = (mission_sel+1) % len(MISSIONS); play('ui', 0.5)
+                        elif e.key == pygame.K_ESCAPE:
+                            state = 'GARAGE'; play('ui', 0.5)
+                        elif e.key == pygame.K_RETURN:
+                            if not (mission_sel > 0 and game.best_rank.get(mission_sel-1) is None):
+                                game.mission_idx = mission_sel
+                                state = 'BRIEFING'; brief_t = 0.0
                                 play('confirm', 0.8)
                             else:
-                                game.deny_flash = 1.0
                                 play('deny', 0.7)
-                        elif pid in game.owned:
-                            game.config[slot] = pid
+                    elif state == 'BRIEFING':
+                        if e.key == pygame.K_RETURN:
+                            game.reset(); state = 'PLAYING'
+                            play('warning', 0.5)
+                        elif e.key == pygame.K_ESCAPE:
+                            state = 'MISSIONS'; play('ui', 0.5)
+                    elif state == 'PLAYING':
+                        if e.key == pygame.K_ESCAPE:
+                            state = 'PAUSED'; pause_sel = 0; play('ui', 0.5)
+                        elif e.key == pygame.K_r:
+                            game.reset()
+                        elif e.key == pygame.K_F3:
+                            game.show_fps = not game.show_fps
+                        elif e.key == pygame.K_h:
+                            game.show_help = not game.show_help
+                        elif e.key in (pygame.K_c, pygame.K_TAB):
+                            if game.scan_mode:
+                                game.scan_mode = False; game.scan_cd = SCAN_CD
+                            elif game.scan_cd <= 0 and game.player.en > 5:
+                                game.scan_mode = True; game.scan_time = SCAN_MAX
+                            play('ui', 0.5)
+                    elif state == 'PAUSED':
+                        if e.key == pygame.K_ESCAPE:
+                            state = 'PLAYING'; play('ui', 0.5)
+                        elif e.key in (pygame.K_UP, pygame.K_w):
+                            pause_sel = (pause_sel-1) % 3; play('ui', 0.5)
+                        elif e.key in (pygame.K_DOWN, pygame.K_s):
+                            pause_sel = (pause_sel+1) % 3; play('ui', 0.5)
+                        elif e.key == pygame.K_r:
+                            game.reset(); state = 'PLAYING'
+                        elif e.key == pygame.K_h:
+                            game.show_help = not game.show_help
+                        elif e.key in (pygame.K_RETURN, pygame.K_SPACE):
+                            if pause_sel == 0: state = 'PLAYING'
+                            elif pause_sel == 1: game.reset(); state = 'PLAYING'
+                            else: state = 'GARAGE'
                             play('confirm', 0.6)
-                    elif e.key == pygame.K_m:
-                        state = 'MISSIONS'; mission_sel = 0
-                        play('confirm', 0.7)
-                elif state == 'MISSIONS':
-                    if e.key == pygame.K_UP:
-                        mission_sel = (mission_sel-1) % len(MISSIONS); play('ui', 0.5)
-                    elif e.key == pygame.K_DOWN:
-                        mission_sel = (mission_sel+1) % len(MISSIONS); play('ui', 0.5)
-                    elif e.key == pygame.K_ESCAPE:
-                        state = 'GARAGE'; play('ui', 0.5)
-                    elif e.key == pygame.K_RETURN:
-                        if not (mission_sel > 0 and game.best_rank.get(mission_sel-1) is None):
-                            game.mission_idx = mission_sel
-                            state = 'BRIEFING'; brief_t = 0.0
-                            play('confirm', 0.8)
-                        else:
-                            play('deny', 0.7)
-                elif state == 'BRIEFING':
-                    if e.key == pygame.K_RETURN:
-                        game.reset(); state = 'PLAYING'
-                        play('warning', 0.5)
-                    elif e.key == pygame.K_ESCAPE:
-                        state = 'MISSIONS'; play('ui', 0.5)
-                elif state == 'PLAYING':
-                    if e.key == pygame.K_ESCAPE:
-                        state = 'PAUSED'; pause_sel = 0; play('ui', 0.5)
-                    elif e.key == pygame.K_r:
-                        game.reset()
-                    elif e.key == pygame.K_F3:
-                        game.show_fps = not game.show_fps
-                    elif e.key == pygame.K_h:
-                        game.show_help = not game.show_help
-                    elif e.key in (pygame.K_c, pygame.K_TAB):
-                        if game.scan_mode:
-                            game.scan_mode = False; game.scan_cd = SCAN_CD
-                        elif game.scan_cd <= 0 and game.player.en > 5:
-                            game.scan_mode = True; game.scan_time = SCAN_MAX
-                        play('ui', 0.5)
-                elif state == 'PAUSED':
-                    if e.key == pygame.K_ESCAPE:
-                        state = 'PLAYING'; play('ui', 0.5)
-                    elif e.key in (pygame.K_UP, pygame.K_w):
-                        pause_sel = (pause_sel-1) % 3; play('ui', 0.5)
-                    elif e.key in (pygame.K_DOWN, pygame.K_s):
-                        pause_sel = (pause_sel+1) % 3; play('ui', 0.5)
-                    elif e.key == pygame.K_r:
-                        game.reset(); state = 'PLAYING'
-                    elif e.key == pygame.K_h:
-                        game.show_help = not game.show_help
-                    elif e.key in (pygame.K_RETURN, pygame.K_SPACE):
-                        if pause_sel == 0: state = 'PLAYING'
-                        elif pause_sel == 1: game.reset(); state = 'PLAYING'
-                        else: state = 'GARAGE'
-                        play('confirm', 0.6)
-                elif state in ('VICTORY', 'GAME_OVER'):
-                    if e.key == pygame.K_SPACE:
-                        state = 'GARAGE'; play('ui', 0.6)
-                    elif e.key == pygame.K_r:
-                        game.reset(); state = 'PLAYING'
-            if state == 'PLAYING' and e.type == pygame.MOUSEBUTTONDOWN and e.button == 3:
-                game.player.fire_larm(game)
-        if state == 'BRIEFING':
-            brief_t += dt
-        screen.fill(C_BG)
-        if state == 'START':
-            draw_title(screen, gt, game.motes, game.campaign_done)
-        elif state == 'GARAGE':
-            draw_garage(screen, game, gt)
-        elif state == 'MISSIONS':
-            draw_missions(screen, game, mission_sel, gt)
-        elif state == 'BRIEFING':
-            draw_briefing(screen, game, brief_t)
-        elif state in ('PLAYING', 'PAUSED'):
-            if state == 'PLAYING':
-                if game.hitstop > 0:
-                    game.hitstop -= dt
-                else:
-                    res = game.update(dt, keys, mouse_pos, mouse_btn)
-                    if res != 'PLAYING': state = res
-            game.draw(screen, gt)
-            mx, my = mouse_pos
-            mwx, mwy = mouse_pos[0]+game.cam[0], mouse_pos[1]+game.cam[1]
-            over = any(math.hypot(e.x-mwx, e.y-mwy) < e.w+15 for e in game.enemies)
-            ccol = C_RED if over else C_CYAN
-            pygame.draw.circle(screen, ccol, (mx,my), 10, 1)
-            pygame.draw.line(screen, ccol, (mx-14,my),(mx-6,my), 1)
-            pygame.draw.line(screen, ccol, (mx+6,my),(mx+14,my), 1)
-            pygame.draw.line(screen, ccol, (mx,my-14),(mx,my-6), 1)
-            pygame.draw.line(screen, ccol, (mx,my+6),(mx,my+14), 1)
-            if game.hitmark > 0:
-                for ddx, ddy in ((-1,-1),(1,-1),(-1,1),(1,1)):
-                    pygame.draw.line(screen, C_WHITE, (mx+ddx*5,my+ddy*5),(mx+ddx*11,my+ddy*11), 2)
-            p = game.player
-            if p.cfg['r_arm'] == 'rail' and p.rail_charge > 0:
-                pygame.draw.rect(screen, (40,44,55), (mx-25, my+20, 50, 6))
-                pygame.draw.rect(screen, C_CYAN if p.rail_charge < 1 else C_WHITE, (mx-25, my+20, 50*p.rail_charge, 6))
-            pips = [
-                ("S", p.cfg['l_arm'] == 'shotgun' and p.shotgun_cd <= 0),
-                ("M", p.missile_cd <= 0 and p.missile_ammo >= 4 and p.en >= 20),
-                ("B", p.blade_cd <= 0 and p.en >= 45),
-            ]
-            for i, (lab, rdy) in enumerate(pips):
-                yy = my + 32 + i*14
-                pygame.draw.rect(screen, (40,44,55), (mx+18, yy, 10, 10))
-                if rdy: pygame.draw.rect(screen, C_CYAN, (mx+18, yy, 10, 10))
-                screen.blit(F_TINY.render(lab, True, C_WHITE if rdy else C_DIM), (mx+32, yy-2))
-            if game.show_help: game.draw_help(screen)
-            if state == 'PAUSED': draw_pause(screen, pause_sel)
-        elif state == 'VICTORY':
-            screen.blit(F_BIG.render("MISSION COMPLETE", True, C_GREEN), (W//2-420, H//2-220))
-            rank_col = {'S':C_YELLOW,'A':C_GREEN,'B':C_BLUE,'C':C_RED}.get(game.final_rank, C_WHITE)
-            screen.blit(F_HUGE.render(game.final_rank or "?", True, rank_col), (W//2-40, H//2-140))
-            st = game.stats
-            screen.blit(F_SM.render(f"TIME {st['time']:.1f}s   DMG TAKEN {int(st['dmg_taken'])}   STAGGERS {st['staggers']}", True, C_WHITE), (W//2-300, H//2+40))
-            screen.blit(F_MED.render(f"EARNED: +{game.earned} CR", True, C_GOLD), (W//2-180, H//2+85))
-            if game.mission_idx == 1 and game.rail_unlocked:
-                screen.blit(F_SM.render("UNLOCKED: RAILGUN (garage)", True, C_CYAN), (W//2-200, H//2+130))
-            if game.mission_idx == 2 and game.campaign_done:
-                screen.blit(F_BIG.render("CAMPAIGN COMPLETE", True, C_GOLD), (W//2-420, H//2+130))
-                screen.blit(F_SM.render("UNLOCKED: OVERDRIVE CORE (garage)", True, C_CYAN), (W//2-240, H//2+180))
-            screen.blit(F_SM.render("R: RETRY   |   SPACE: GARAGE", True, C_YELLOW), (W//2-200, H//2+225))
-            screen.blit(VIG, (0,0)); screen.blit(SCANLINES, (0,0))
-        elif state == 'GAME_OVER':
-            screen.blit(F_BIG.render("MISSION FAILED", True, C_RED), (W//2-380, H//2-100))
-            screen.blit(F_SM.render(f"SALVAGE: +{game.earned} CR", True, C_GOLD), (W//2-160, H//2))
-            screen.blit(F_SM.render("R: RETRY   |   SPACE: GARAGE", True, C_YELLOW), (W//2-200, H//2+60))
-            screen.blit(VIG, (0,0)); screen.blit(SCANLINES, (0,0))
-        pygame.display.flip()
-    pygame.quit()
-    sys.exit()
+                    elif state in ('VICTORY', 'GAME_OVER'):
+                        if e.key == pygame.K_SPACE:
+                            state = 'GARAGE'; play('ui', 0.6)
+                        elif e.key == pygame.K_r:
+                            game.reset(); state = 'PLAYING'
+                if state == 'PLAYING' and e.type == pygame.MOUSEBUTTONDOWN and e.button == 3:
+                    game.player.fire_larm(game)
+            if state == 'BRIEFING':
+                brief_t += dt
+            screen.fill(C_BG)
+            if state == 'START':
+                draw_title(screen, gt, game.motes, game.campaign_done)
+            elif state == 'GARAGE':
+                draw_garage(screen, game, gt)
+            elif state == 'MISSIONS':
+                draw_missions(screen, game, mission_sel, gt)
+            elif state == 'BRIEFING':
+                draw_briefing(screen, game, brief_t)
+            elif state in ('PLAYING', 'PAUSED'):
+                if state == 'PLAYING':
+                    if game.hitstop > 0:
+                        game.hitstop -= dt
+                    else:
+                        res = game.update(dt, keys, mouse_pos, mouse_btn)
+                        if res != 'PLAYING': state = res
+                game.draw(screen, gt)
+                mx, my = mouse_pos
+                mwx, mwy = mouse_pos[0]+game.cam[0], mouse_pos[1]+game.cam[1]
+                over = any(math.hypot(e.x-mwx, e.y-mwy) < e.w+15 for e in game.enemies)
+                ccol = C_RED if over else C_CYAN
+                pygame.draw.circle(screen, ccol, (mx,my), 10, 1)
+                pygame.draw.line(screen, ccol, (mx-14,my),(mx-6,my), 1)
+                pygame.draw.line(screen, ccol, (mx+6,my),(mx+14,my), 1)
+                pygame.draw.line(screen, ccol, (mx,my-14),(mx,my-6), 1)
+                pygame.draw.line(screen, ccol, (mx,my+6),(mx,my+14), 1)
+                if game.hitmark > 0:
+                    for ddx, ddy in ((-1,-1),(1,-1),(-1,1),(1,1)):
+                        pygame.draw.line(screen, C_WHITE, (mx+ddx*5,my+ddy*5),(mx+ddx*11,my+ddy*11), 2)
+                p = game.player
+                if p.cfg['r_arm'] == 'rail' and p.rail_charge > 0:
+                    pygame.draw.rect(screen, (40,44,55), (mx-25, my+20, 50, 6))
+                    pygame.draw.rect(screen, C_CYAN if p.rail_charge < 1 else C_WHITE, (mx-25, my+20, 50*p.rail_charge, 6))
+                pips = [
+                    ("S", p.cfg['l_arm'] == 'shotgun' and p.shotgun_cd <= 0),
+                    ("M", p.missile_cd <= 0 and p.missile_ammo >= 4 and p.en >= 20),
+                    ("B", p.blade_cd <= 0 and p.en >= 45),
+                ]
+                for i, (lab, rdy) in enumerate(pips):
+                    yy = my + 32 + i*14
+                    pygame.draw.rect(screen, (40,44,55), (mx+18, yy, 10, 10))
+                    if rdy: pygame.draw.rect(screen, C_CYAN, (mx+18, yy, 10, 10))
+                    screen.blit(F_TINY.render(lab, True, C_WHITE if rdy else C_DIM), (mx+32, yy-2))
+                if game.show_help: game.draw_help(screen)
+                if state == 'PAUSED': draw_pause(screen, pause_sel)
+            elif state == 'VICTORY':
+                screen.blit(F_BIG.render("MISSION COMPLETE", True, C_GREEN), (W//2-420, H//2-220))
+                rank_col = {'S':C_YELLOW,'A':C_GREEN,'B':C_BLUE,'C':C_RED}.get(game.final_rank, C_WHITE)
+                screen.blit(F_HUGE.render(game.final_rank or "?", True, rank_col), (W//2-40, H//2-140))
+                st = game.stats
+                screen.blit(F_SM.render(f"TIME {st['time']:.1f}s   DMG TAKEN {int(st['dmg_taken'])}   STAGGERS {st['staggers']}", True, C_WHITE), (W//2-300, H//2+40))
+                screen.blit(F_MED.render(f"EARNED: +{game.earned} CR", True, C_GOLD), (W//2-180, H//2+85))
+                if game.mission_idx == 1 and game.rail_unlocked:
+                    screen.blit(F_SM.render("UNLOCKED: RAILGUN (garage)", True, C_CYAN), (W//2-200, H//2+130))
+                if game.mission_idx == 2 and game.campaign_done:
+                    screen.blit(F_BIG.render("CAMPAIGN COMPLETE", True, C_GOLD), (W//2-420, H//2+130))
+                    screen.blit(F_SM.render("UNLOCKED: OVERDRIVE CORE (garage)", True, C_CYAN), (W//2-240, H//2+180))
+                screen.blit(F_SM.render("R: RETRY   |   SPACE: GARAGE", True, C_YELLOW), (W//2-200, H//2+225))
+                screen.blit(VIG, (0,0)); screen.blit(SCANLINES, (0,0))
+            elif state == 'GAME_OVER':
+                screen.blit(F_BIG.render("MISSION FAILED", True, C_RED), (W//2-380, H//2-100))
+                screen.blit(F_SM.render(f"SALVAGE: +{game.earned} CR", True, C_GOLD), (W//2-160, H//2))
+                screen.blit(F_SM.render("R: RETRY   |   SPACE: GARAGE", True, C_YELLOW), (W//2-200, H//2+60))
+                screen.blit(VIG, (0,0)); screen.blit(SCANLINES, (0,0))
+            pygame.display.flip()
+        pygame.quit()
+        sys.exit()
+    except Exception:
+        traceback.print_exc()
+        try:
+            screen.fill((10,0,0))
+            tb = traceback.format_exc().splitlines()[-6:]
+            y = 40
+            for ln in tb:
+                screen.blit(pygame.font.Font(None, 22).render(ln[:110], True, (255,90,90)), (20, y))
+                y += 26
+            pygame.display.flip()
+        except Exception:
+            pass
+        import time; time.sleep(30)
 
 if __name__ == '__main__':
     main()
