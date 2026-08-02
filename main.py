@@ -1,9 +1,7 @@
 import pygame, math, random, sys, array, json, os, traceback
 
-# ================= ВЕБ-ФЛАГ И БЕЗОПАСНЫЙ СТАРТ =================
-WEB = (sys.platform == 'emscripten')   # True только в веб-сборке pygbag
-
-if not WEB:                            # в вебе mixer НЕ трогаем вообще
+WEB = (sys.platform == 'emscripten')
+if not WEB:
     try: pygame.mixer.pre_init(22050, -16, 1, 512)
     except Exception: pass
 pygame.init()
